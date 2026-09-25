@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { CheckIn, CheeseInfo } from "@/lib/cheese";
-import { getPassword, resizeImage, setPassword } from "@/lib/store";
+import { resizeImage } from "@/lib/store";
 import { RatingInput } from "./Stars";
 
 const MILK: Record<CheeseInfo["milk"], string> = {
@@ -16,7 +16,9 @@ const MILK: Record<CheeseInfo["milk"], string> = {
 
 type Step = "capture" | "identifying" | "review";
 
-export function CheckInFlow({ onDone }: { onDone: (checkIn: CheckIn) => void }) {
+type NewCheckIn = Omit<CheckIn, "id" | "createdAt" | "user">;
+
+export function CheckInFlow({ onDone }: { onDone: (checkIn: NewCheckIn) => Promise<void> }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<Step>("capture");
   const [photo, setPhoto] = useState<string>();
@@ -26,6 +28,7 @@ export function CheckInFlow({ onDone }: { onDone: (checkIn: CheckIn) => void }) 
   const [notes, setNotes] = useState("");
   const [location, setLocation] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -42,12 +45,11 @@ export function CheckInFlow({ onDone }: { onDone: (checkIn: CheckIn) => void }) 
     setStep("identifying");
     setError("");
     try {
-      let res = await callIdentify(photo, name, getPassword());
-      if (res.status === 401) {
-        const pw = prompt("Wachtwoord voor Kaasbord:") ?? "";
-        setPassword(pw);
-        res = await callIdentify(photo, name, pw);
-      }
+      const res = await fetch("/api/identify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ image: photo, name }),
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Er ging iets mis");
       setCheese(data.cheese);
@@ -58,17 +60,16 @@ export function CheckInFlow({ onDone }: { onDone: (checkIn: CheckIn) => void }) 
     }
   }
 
-  function save() {
+  async function save() {
     if (!cheese) return;
-    onDone({
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      cheese,
-      rating,
-      notes: notes.trim(),
-      location: location.trim(),
-      photo,
-    });
+    setSaving(true);
+    setError("");
+    try {
+      await onDone({ cheese, rating, notes: notes.trim(), location: location.trim(), photo });
+    } catch (err) {
+      setError((err as Error).message);
+      setSaving(false);
+    }
   }
 
   if (step === "identifying") {
@@ -129,8 +130,9 @@ export function CheckInFlow({ onDone }: { onDone: (checkIn: CheckIn) => void }) 
             onChange={(e) => setLocation(e.target.value)}
           />
         </div>
-        <button className="btn" disabled={!rating || !cheese.name.trim()} onClick={save}>
-          Inchecken
+        {error && <p className="error">{error}</p>}
+        <button className="btn" disabled={saving || !rating || !cheese.name.trim()} onClick={save}>
+          {saving ? "Opslaan…" : "Inchecken"}
         </button>
         <button className="btn secondary" onClick={() => setStep("capture")}>
           Terug
@@ -174,12 +176,4 @@ export function CheckInFlow({ onDone }: { onDone: (checkIn: CheckIn) => void }) 
       </button>
     </div>
   );
-}
-
-function callIdentify(image: string | undefined, name: string, password: string) {
-  return fetch("/api/identify", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-app-password": password },
-    body: JSON.stringify({ image, name }),
-  });
 }

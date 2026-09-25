@@ -1,34 +1,51 @@
 "use client";
 
-import { get, set } from "idb-keyval";
 import type { CheckIn } from "./cheese";
 
-// Check-ins live in IndexedDB on the phone itself: no database or account
-// needed, and photos don't count against localStorage's small quota.
-const KEY = "kaasbord:checkins";
+// The chosen name is a per-device convenience; check-ins live in Vercel Blob.
+const USER_KEY = "formatica:user";
 
-export async function loadCheckIns(): Promise<CheckIn[]> {
-  return (await get<CheckIn[]>(KEY)) ?? [];
-}
-
-export async function saveCheckIns(checkIns: CheckIn[]): Promise<void> {
-  await set(KEY, checkIns);
-}
-
-export function getPassword(): string {
+export function getUser(): string {
   try {
-    return localStorage.getItem("kaasbord:password") ?? "";
+    return localStorage.getItem(USER_KEY) ?? "";
   } catch {
     return "";
   }
 }
 
-export function setPassword(value: string) {
+export function setUser(value: string) {
   try {
-    localStorage.setItem("kaasbord:password", value);
+    localStorage.setItem(USER_KEY, value);
   } catch {
     // Private mode: the user will simply be asked again.
   }
+}
+
+export async function fetchCheckIns(): Promise<CheckIn[]> {
+  const res = await fetch("/api/checkins", { cache: "no-store" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Kon check-ins niet laden");
+  return data.checkIns;
+}
+
+export async function postCheckIn(input: Omit<CheckIn, "id" | "createdAt">): Promise<CheckIn> {
+  const res = await fetch("/api/checkins", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? "Opslaan mislukt");
+  return data.checkIn;
+}
+
+export async function removeCheckIn(checkIn: CheckIn, user: string) {
+  const res = await fetch("/api/checkins", {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: checkIn.id, user }),
+  });
+  if (!res.ok) throw new Error((await res.json()).error ?? "Verwijderen mislukt");
 }
 
 // Downscale a photo so it's cheap to send to Claude and small to store.
@@ -51,13 +68,4 @@ export function resizeImage(file: File, maxSize = 1024, quality = 0.8): Promise<
     };
     img.src = url;
   });
-}
-
-export function exportCheckIns(checkIns: CheckIn[]) {
-  const blob = new Blob([JSON.stringify(checkIns, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `kaasbord-${new Date().toISOString().slice(0, 10)}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
 }

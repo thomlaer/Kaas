@@ -8,7 +8,7 @@ export const maxDuration = 60;
 
 const client = new Anthropic();
 
-const SYSTEM = `Je bent een ervaren kaasmeester en helpt gebruikers van een kaas-app (zoals Untappd, maar voor kaas).
+const SYSTEM = `Je bent een ervaren kaasmeester en helpt gebruikers van Formatica, een kaas-app (zoals Untappd, maar voor kaas).
 De gebruiker stuurt een foto van een kaas, een etiket of verpakking, en/of een naam.
 Herken de kaas zo specifiek mogelijk (merk, soort, rijping). Lees etiketten nauwkeurig.
 Als je alleen de soort kunt bepalen, geef dan de soort als naam en zet confidence op "laag".
@@ -23,11 +23,6 @@ export async function POST(req: Request) {
       { error: "ANTHROPIC_API_KEY is niet ingesteld in Vercel" },
       { status: 500 },
     );
-  }
-
-  const password = process.env.APP_PASSWORD;
-  if (password && req.headers.get("x-app-password") !== password) {
-    return NextResponse.json({ error: "Onjuist wachtwoord" }, { status: 401 });
   }
 
   const body = (await req.json().catch(() => null)) as {

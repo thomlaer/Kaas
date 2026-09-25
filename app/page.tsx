@@ -1,78 +1,178 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckInFlow } from "@/components/CheckInFlow";
 import { Stars } from "@/components/Stars";
 import { BADGES } from "@/lib/badges";
 import type { CheckIn } from "@/lib/cheese";
-import { exportCheckIns, loadCheckIns, saveCheckIns } from "@/lib/store";
+import { fetchCheckIns, getUser, postCheckIn, removeCheckIn, setUser } from "@/lib/store";
 
 type Tab = "feed" | "checkin" | "profile";
 
 export default function Home() {
+  const [user, setUserState] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("feed");
   const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [open, setOpen] = useState<CheckIn>();
 
-  useEffect(() => {
-    loadCheckIns().then((c) => {
-      setCheckIns(c);
-      setLoaded(true);
-    });
+  const refresh = useCallback(async () => {
+    try {
+      setCheckIns(await fetchCheckIns());
+      setError("");
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  function update(next: CheckIn[]) {
-    setCheckIns(next);
-    saveCheckIns(next);
+  useEffect(() => {
+    setUserState(getUser());
+    refresh();
+  }, [refresh]);
+
+  const mine = useMemo(() => checkIns.filter((c) => c.user === user), [checkIns, user]);
+
+  if (user === null) return null;
+  if (!user) {
+    return (
+      <Login
+        onLogin={(name) => {
+          setUser(name);
+          setUserState(name);
+        }}
+      />
+    );
   }
 
-  function addCheckIn(checkIn: CheckIn) {
-    const before = BADGES.filter((b) => b.earned(checkIns)).map((b) => b.id);
-    const next = [checkIn, ...checkIns];
-    update(next);
-    const unlocked = BADGES.filter((b) => b.earned(next) && !before.includes(b.id));
+  async function addCheckIn(input: Omit<CheckIn, "id" | "createdAt" | "user">) {
+    const before = BADGES.filter((b) => b.earned(mine)).map((b) => b.id);
+    const saved = await postCheckIn({ ...input, user: user! });
+    const nextMine = [saved, ...mine];
+    setCheckIns((all) => [saved, ...all]);
+    const unlocked = BADGES.filter((b) => b.earned(nextMine) && !before.includes(b.id));
     if (unlocked.length) {
       alert(`Nieuwe badge! ${unlocked.map((b) => `${b.icon} ${b.name}`).join(", ")}`);
     }
     setTab("feed");
   }
 
-  function remove(id: string) {
+  async function remove(checkIn: CheckIn) {
     if (!confirm("Deze check-in verwijderen?")) return;
-    update(checkIns.filter((c) => c.id !== id));
+    try {
+      await removeCheckIn(checkIn, user!);
+      setCheckIns((all) => all.filter((c) => c.id !== checkIn.id));
+      setOpen(undefined);
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  }
+
+  function go(next: Tab) {
     setOpen(undefined);
+    setTab(next);
+    if (next === "feed") refresh();
   }
 
   return (
     <main className="app">
       <header className="header">
-        <h1>{tab === "checkin" ? "Inchecken" : tab === "profile" ? "Mijn kazen" : "Kaasbord"}</h1>
+        <h1>{tab === "checkin" ? "Inchecken" : tab === "profile" ? user : "Formatica"}</h1>
         {tab === "feed" && <span className="muted small">{checkIns.length} check-ins</span>}
       </header>
 
       {open ? (
-        <Detail checkIn={open} onBack={() => setOpen(undefined)} onDelete={() => remove(open.id)} />
+        <Detail
+          checkIn={open}
+          canDelete={open.user === user}
+          onBack={() => setOpen(undefined)}
+          onDelete={() => remove(open)}
+        />
       ) : tab === "checkin" ? (
         <CheckInFlow onDone={addCheckIn} />
       ) : tab === "profile" ? (
-        <Profile checkIns={checkIns} />
+        <Profile
+          checkIns={mine}
+          onOpen={setOpen}
+          onLogout={() => {
+            setUser("");
+            setUserState("");
+          }}
+        />
+      ) : loading ? (
+        <div className="spinner">🧀</div>
+      ) : error ? (
+        <p className="error">{error}</p>
       ) : (
-        loaded && <Feed checkIns={checkIns} onOpen={setOpen} onStart={() => setTab("checkin")} />
+        <Feed checkIns={checkIns} onOpen={setOpen} onStart={() => go("checkin")} />
       )}
 
       <nav className="tabbar">
-        <button className={tab === "feed" ? "active" : ""} onClick={() => { setOpen(undefined); setTab("feed"); }}>
+        <button className={tab === "feed" ? "active" : ""} onClick={() => go("feed")}>
           <span>🏠</span>Feed
         </button>
-        <button className={`checkin-tab ${tab === "checkin" ? "active" : ""}`} onClick={() => { setOpen(undefined); setTab("checkin"); }}>
+        <button className={`checkin-tab ${tab === "checkin" ? "active" : ""}`} onClick={() => go("checkin")}>
           <span>＋</span>Check-in
         </button>
-        <button className={tab === "profile" ? "active" : ""} onClick={() => { setOpen(undefined); setTab("profile"); }}>
+        <button className={tab === "profile" ? "active" : ""} onClick={() => go("profile")}>
           <span>🏅</span>Profiel
         </button>
       </nav>
     </main>
+  );
+}
+
+function Login({ onLogin }: { onLogin: (name: string) => void }) {
+  const [name, setName] = useState("");
+  return (
+    <main className="app">
+      <div className="empty stack">
+        <div className="big">🧀</div>
+        <h1 style={{ margin: 0 }}>Formatica</h1>
+        <p className="muted">Check je kazen in, geef ze sterren en verzamel badges.</p>
+        <form
+          className="stack"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (name.trim()) onLogin(name.trim());
+          }}
+        >
+          <input
+            className="field"
+            placeholder="Je naam"
+            autoComplete="nickname"
+            maxLength={40}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button className="btn" disabled={!name.trim()}>
+            Beginnen
+          </button>
+        </form>
+      </div>
+    </main>
+  );
+}
+
+function CheckInRow({ checkIn: c, onOpen, showUser }: { checkIn: CheckIn; onOpen: (c: CheckIn) => void; showUser: boolean }) {
+  return (
+    <button className="card checkin" style={{ width: "100%", textAlign: "left" }} onClick={() => onOpen(c)}>
+      {c.photo ? <img src={c.photo} alt="" loading="lazy" /> : <div className="thumb">🧀</div>}
+      <div>
+        {showUser && <div className="small"><strong>{c.user}</strong> <span className="muted">proefde</span></div>}
+        <h3>{c.cheese.name}</h3>
+        <div className="small muted">
+          {c.cheese.style} · {c.cheese.country}
+        </div>
+        <Stars rating={c.rating} />
+        <div className="small muted">
+          {new Date(c.createdAt).toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
+          {c.location && ` · ${c.location}`}
+        </div>
+      </div>
+    </button>
   );
 }
 
@@ -83,7 +183,7 @@ function Feed({ checkIns, onOpen, onStart }: { checkIns: CheckIn[]; onOpen: (c: 
         <div className="big">🧀</div>
         <p>Nog geen kazen ingecheckt.</p>
         <button className="btn" onClick={onStart}>
-          Check je eerste kaas in
+          Check de eerste kaas in
         </button>
       </div>
     );
@@ -91,26 +191,23 @@ function Feed({ checkIns, onOpen, onStart }: { checkIns: CheckIn[]; onOpen: (c: 
   return (
     <div>
       {checkIns.map((c) => (
-        <button key={c.id} className="card checkin" style={{ width: "100%", textAlign: "left" }} onClick={() => onOpen(c)}>
-          {c.photo ? <img src={c.photo} alt="" /> : <div className="thumb">🧀</div>}
-          <div>
-            <h3>{c.cheese.name}</h3>
-            <div className="small muted">
-              {c.cheese.style} · {c.cheese.country}
-            </div>
-            <Stars rating={c.rating} />
-            <div className="small muted">
-              {new Date(c.createdAt).toLocaleDateString("nl-NL", { day: "numeric", month: "short" })}
-              {c.location && ` · ${c.location}`}
-            </div>
-          </div>
-        </button>
+        <CheckInRow key={c.id} checkIn={c} onOpen={onOpen} showUser />
       ))}
     </div>
   );
 }
 
-function Detail({ checkIn: c, onBack, onDelete }: { checkIn: CheckIn; onBack: () => void; onDelete: () => void }) {
+function Detail({
+  checkIn: c,
+  canDelete,
+  onBack,
+  onDelete,
+}: {
+  checkIn: CheckIn;
+  canDelete: boolean;
+  onBack: () => void;
+  onDelete: () => void;
+}) {
   return (
     <div className="stack">
       <button className="btn secondary" onClick={onBack}>
@@ -118,6 +215,7 @@ function Detail({ checkIn: c, onBack, onDelete }: { checkIn: CheckIn; onBack: ()
       </button>
       {c.photo && <img className="photo-preview" src={c.photo} alt="" />}
       <div className="card">
+        <div className="small muted">{c.user}</div>
         <h2 style={{ margin: "0 0 4px" }}>{c.cheese.name}</h2>
         {c.cheese.producer && <div className="muted">{c.cheese.producer}</div>}
         <Stars rating={c.rating} />
@@ -142,14 +240,16 @@ function Detail({ checkIn: c, onBack, onDelete }: { checkIn: CheckIn; onBack: ()
         </div>
         {c.cheese.pairings.length > 0 && <p className="small muted">Lekker met: {c.cheese.pairings.join(", ")}</p>}
       </div>
-      <button className="btn link" onClick={onDelete}>
-        Verwijderen
-      </button>
+      {canDelete && (
+        <button className="btn link" onClick={onDelete}>
+          Verwijderen
+        </button>
+      )}
     </div>
   );
 }
 
-function Profile({ checkIns }: { checkIns: CheckIn[] }) {
+function Profile({ checkIns, onOpen, onLogout }: { checkIns: CheckIn[]; onOpen: (c: CheckIn) => void; onLogout: () => void }) {
   const stats = useMemo(() => {
     const unique = new Set(checkIns.map((c) => c.cheese.name.toLowerCase().trim())).size;
     const avg = checkIns.length ? checkIns.reduce((s, c) => s + c.rating, 0) / checkIns.length : 0;
@@ -191,19 +291,14 @@ function Profile({ checkIns }: { checkIns: CheckIn[] }) {
         <>
           <h2>Top kazen</h2>
           {stats.top.map((c) => (
-            <div key={c.id} className="card" style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>{c.cheese.name}</span>
-              <Stars rating={c.rating} />
-            </div>
+            <CheckInRow key={c.id} checkIn={c} onOpen={onOpen} showUser={false} />
           ))}
         </>
       )}
 
-      {checkIns.length > 0 && (
-        <button className="btn secondary" style={{ marginTop: 16 }} onClick={() => exportCheckIns(checkIns)}>
-          Exporteer als backup (JSON)
-        </button>
-      )}
+      <button className="btn secondary" style={{ marginTop: 16 }} onClick={onLogout}>
+        Andere naam gebruiken
+      </button>
     </div>
   );
 }

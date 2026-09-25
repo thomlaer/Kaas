@@ -25,9 +25,10 @@ export type CheeseInfo = z.infer<typeof CheeseInfoSchema>;
 export type CheckIn = {
   id: string;
   createdAt: string; // ISO
+  user: string;
   cheese: CheeseInfo;
   rating: number; // 0.5 - 5, steps of 0.5
   notes: string;
   location: string;
-  photo?: string; // small JPEG data URL
+  photo?: string; // Vercel Blob URL
 };

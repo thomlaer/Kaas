@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Kaasbord",
-    short_name: "Kaasbord",
-    description: "Untappd, maar dan voor kaas",
+    name: "Formatica",
+    short_name: "Formatica",
+    description: "Check je kazen in, samen met je vrienden",
     start_url: "/",
     display: "standalone",
     background_color: "#fdf6e3",

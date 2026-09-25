@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Kaasbord",
+  title: "Formatica",
   description: "Check je kazen in, geef ze sterren en verzamel badges.",
-  appleWebApp: { capable: true, title: "Kaasbord", statusBarStyle: "default" },
+  appleWebApp: { capable: true, title: "Formatica", statusBarStyle: "default" },
 };
 
 export const viewport: Viewport = {
