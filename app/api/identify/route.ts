@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { NextResponse } from "next/server";
 import { CheeseInfoSchema } from "@/lib/cheese";
 
@@ -7,6 +8,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const client = new Anthropic();
+const MODEL = "claude-opus-5";
 
 const SYSTEM = `Je bent een ervaren kaasmeester en helpt gebruikers van Formatica, een kaas-app (zoals Untappd, maar voor kaas).
 De gebruiker stuurt een foto van een kaas, een etiket of verpakking, en/of een naam.
@@ -59,25 +61,23 @@ export async function POST(req: Request) {
   });
 
   try {
-    const response = await client.beta.messages.parse({
-      model: "claude-opus-5",
-      max_tokens: 16000,
-      thinking: { type: "adaptive" },
-      output_config: { effort: "medium", format: betaZodOutputFormat(CheeseInfoSchema) },
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      system: SYSTEM,
-      messages: [{ role: "user", content }],
+    const cheese = await identify(content).catch((error) => {
+      // Some accounts don't have the beta features enabled yet: retry with a
+      // plain request before giving up.
+      if (error instanceof Anthropic.APIError && [400, 403, 404].includes(error.status ?? 0)) {
+        console.warn("Beta request failed, retrying plain", error.status, apiMessage(error));
+        return identifyPlain(content);
+      }
+      throw error;
     });
 
-    if (response.stop_reason === "refusal" || !response.parsed_output) {
+    if (!cheese) {
       return NextResponse.json(
         { error: "Claude kon deze kaas niet herkennen. Probeer een andere foto." },
         { status: 422 },
       );
     }
-
-    return NextResponse.json({ cheese: response.parsed_output });
+    return NextResponse.json({ cheese });
   } catch (error) {
     if (error instanceof Anthropic.AuthenticationError) {
       return NextResponse.json(
@@ -89,9 +89,42 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Even te druk, probeer het zo opnieuw" }, { status: 429 });
     }
     if (error instanceof Anthropic.APIError) {
-      console.error("Claude API error", error.status, error.message);
-      return NextResponse.json({ error: "Fout bij Claude API" }, { status: 502 });
+      console.error("Claude API error", error.status, apiMessage(error));
+      return NextResponse.json(
+        { error: `Fout bij Claude API (${error.status}): ${apiMessage(error)}` },
+        { status: 502 },
+      );
     }
     throw error;
   }
+}
+
+async function identify(content: Anthropic.Beta.BetaContentBlockParam[]) {
+  const response = await client.beta.messages.parse({
+    model: MODEL,
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    output_config: { effort: "medium", format: betaZodOutputFormat(CheeseInfoSchema) },
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    system: SYSTEM,
+    messages: [{ role: "user", content }],
+  });
+  return response.stop_reason === "refusal" ? null : response.parsed_output;
+}
+
+async function identifyPlain(content: Anthropic.Beta.BetaContentBlockParam[]) {
+  const response = await client.messages.parse({
+    model: MODEL,
+    max_tokens: 16000,
+    output_config: { format: zodOutputFormat(CheeseInfoSchema) },
+    system: SYSTEM,
+    messages: [{ role: "user", content: content as Anthropic.ContentBlockParam[] }],
+  });
+  return response.stop_reason === "refusal" ? null : response.parsed_output;
+}
+
+function apiMessage(error: InstanceType<typeof Anthropic.APIError>): string {
+  const body = error.error as { error?: { message?: string } } | undefined;
+  return body?.error?.message ?? error.message;
 }
