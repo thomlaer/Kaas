@@ -1,4 +1,5 @@
 import { ImageResponse } from "next/og";
+import { CheeseLogo } from "@/components/CheeseLogo";
 
 export const size = { width: 512, height: 512 };
 export const contentType = "image/png";
@@ -13,11 +14,10 @@ export default function Icon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#f2b632",
-          fontSize: 340,
+          background: "#1f3f7a",
         }}
       >
-        🧀
+        <CheeseLogo size={409} />
       </div>
     ),
     size,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CheeseLogo } from "@/components/CheeseLogo";
 import { CheckInFlow } from "@/components/CheckInFlow";
 import { Stars } from "@/components/Stars";
 import { BADGES } from "@/lib/badges";
@@ -129,7 +130,7 @@ function Login({ onLogin }: { onLogin: (name: string) => void }) {
   return (
     <main className="app">
       <div className="empty stack">
-        <div className="big">🧀</div>
+        <CheeseLogo size={96} />
         <h1 style={{ margin: 0 }}>Formatica</h1>
         <p className="muted">Check je kazen in, geef ze sterren en verzamel badges.</p>
         <form
